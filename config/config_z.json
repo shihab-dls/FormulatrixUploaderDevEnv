@@ -1,0 +1,10 @@
+{
+	"upload_dir":"/usr/local/app/upload",
+	"holding_dir":"/usr/local/app/archive",
+	"task":"Z",
+	"max_files":4000,
+	"logging": {
+		"rotating_file": {"filename": "/usr/local/app/fmlx_ul.log", "max_bytes": 1000000, "no_files": 20, "format": "* %(asctime)s [id=%(thread)d] <%(levelname)s> %(message)s", "level": "debug"}
+	}
+
+}

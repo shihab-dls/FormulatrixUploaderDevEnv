@@ -1,0 +1,19 @@
+{
+	"upload_dir":"/usr/local/app/upload",
+	"holding_dir":"/usr/local/app/EF",
+        "task":"EF",
+        "max_files":4000,
+        "max_files_in_batch": 250,
+        "thumb_width":	200,
+        "thumb_height":	150,
+        "types": {
+            "CrystalQuickX": { "well_per_row": 12, "drops_per_well": 2 },
+            "MitegenInSitu": { "well_per_row": 12, "drops_per_well": 2 },
+            "MitegenInSitu_3_Drop": { "well_per_row": 12, "drops_per_well": 3 },
+            "FilmBatch": { "well_per_row": 12, "drops_per_well": 1 },
+            "ReferencePlate": { "well_per_row": 2, "drops_per_well": 1 }
+	},
+	"logging": {
+		"rotating_file": {"filename": "/usr/local/app/logs/fmlx_ul.log", "max_bytes": 1000000, "no_files": 20, "format": "* %(asctime)s [id=%(thread)d] <%(levelname)s> %(message)s", "level": "debug"}
+	}
+}
