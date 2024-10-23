@@ -210,24 +210,3 @@ def set_logging(logs):
         else:
             handler.setLevel(logging.WARNING)
         logger.addHandler(handler)
-
-## Posts a job for an EF image for downstream processing
-def publish(job, channel, callback):
-    
-    payload = {
-        "plate": f"{job.inspectionId}",
-        "well": int(job.location),
-        "image_path": f"{job.new_path}"
-    }
-
-    delivery = json.dumps(payload)
-
-    channel.basic_publish(
-        exchange="",
-        routing_key="jobs",
-        properties=pika.BasicProperties(
-            reply_to=callback
-        ),
-        body=delivery
-    )
-    print(f"Sent job: {delivery}")

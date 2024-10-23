@@ -6,12 +6,12 @@ import json
 
 class FormulatrixUploader():
 
-    async def process_job(self, file_list, config, engine, rabbitmq_creds_path):
+    async def process_job(self, file_list, config, engine, rabbitmq_creds_path, up_files_out_dir):
 
         worker_type = config["task"]        
         worker = await self.create_worker(worker_type, config, engine, rabbitmq_creds_path)
 
-        results = [await worker.process_file(file) for file in file_list]
+        results = [await worker.process_file(file, up_files_out_dir) for file in file_list]
         
         return results
     

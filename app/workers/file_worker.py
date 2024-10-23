@@ -12,6 +12,7 @@ import tqdm.asyncio
 from collections import namedtuple
 import logging
 import logging.handlers
+import uuid
 
 logger = logging.getLogger()
 
@@ -21,7 +22,7 @@ class ZWorker:
         self.session = session
         set_logging(config["logging"])
 
-    async def process_file(self, date_dirs):
+    async def process_file(self, date_dirs, up_files_out_dir):
         logger.info(f"Date directories found: {date_dirs}")
         container_dict = self.get_container_dict(date_dirs)            
         ## Handle each barcode dir, providing an executor for each
@@ -90,7 +91,7 @@ class EFWorker:
         self.channel = channel
         self.callback_queue = callback_queue
 
-    async def process_file(self, ef_files):
+    async def process_file(self, ef_files, up_files_out_dir):
         unhandled_files = []
 
         jpg_files = [jpg for jpg in ef_files if jpg.split(".")[1] == 'jpg']
@@ -166,10 +167,14 @@ class EFWorker:
         unhandled_files.append([result for result in results if not result.new_path])
         handled_files = [result for result in results if result.new_path]
 
-        ## Publish a RabbitMQ job for each handled file
-        # for file in handled_files:
-        #     publish(file, self.channel, self.callback_queue)
-
+        # Generate a list of handled files
+        rand_id = str(uuid.uuid4())
+        up_files_out_path = f"{up_files_out_dir}/{rand_id}.txt"
+        with open(up_files_out_path, "w") as fh:
+            fh.write("\n".join(str(file.new_path) for file in handled_files))
+            fh.write("\n")
+        
+        logger.info(f"Saved list of {len(handled_files)} files to {up_files_out_path}")
 
         return f"Processed Inspection IDs: [{unique_inspection_id}]"
 

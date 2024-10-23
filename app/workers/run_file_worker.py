@@ -21,14 +21,15 @@ async def main(engine, session, rabbitmq_creds_path):
     ef_files = [glob.glob(f'{config_ef["holding_dir"]}/*.*')]
     start = time.time()
     worker = FormulatrixUploader()
-    result_ef = await worker.process_job(ef_files,config_ef,session, rabbitmq_creds_path)
+    result_ef = await worker.process_job(ef_files,config_ef,session, rabbitmq_creds_path,up_files_out_dir)
     worker = FormulatrixUploader()
-    result_z = await worker.process_job(date_dirs,config_z,session, rabbitmq_creds_path)
+    result_z = await worker.process_job(date_dirs,config_z,session, rabbitmq_creds_path, up_files_out_dir)
     elapsed = time.time() - start
     print(f"{result_ef} \n {result_z} \n Execution Time: {elapsed}")
     #await asyncio.sleep(10)
 
 if __name__ == "__main__":
+    up_files_out_dir = "../../filelists/"
     rabbitmq_creds_path = "../../config/rabbitmq.json"
     credentials_path = "../../config/dbconf.json"
     with open(credentials_path, 'r') as j:

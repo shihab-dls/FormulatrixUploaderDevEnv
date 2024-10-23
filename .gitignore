@@ -1,3 +1,4 @@
-EF/*.*
-upload/*.*
-archive/*.*
+EF/*
+upload/*
+archive/*
+filelists/*.txt
