@@ -1,0 +1,9 @@
+{
+"user":"guest",
+"password":"guest",
+"server":"rabbitmq",
+"port":"5672",
+"vhost":"/",
+"job_queue":"jobs",
+"result_queue":"res"
+}

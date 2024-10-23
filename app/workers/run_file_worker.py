@@ -8,7 +8,7 @@ import ispyb.sqlalchemy
 import time
 import json
 
-async def main(engine, session):
+async def main(engine, session, rabbitmq_creds_path):
     # Create an instance of the FormulatrixUploader
     config_file_ef = "../../config/config_ef.json"
     config_file_z = "../../config/config_z.json"
@@ -21,14 +21,15 @@ async def main(engine, session):
     ef_files = [glob.glob(f'{config_ef["holding_dir"]}/*.*')]
     start = time.time()
     worker = FormulatrixUploader()
-    result_ef = await worker.process_job(ef_files,config_ef,session)
+    result_ef = await worker.process_job(ef_files,config_ef,session, rabbitmq_creds_path)
     worker = FormulatrixUploader()
-    result_z = await worker.process_job(date_dirs,config_z,session)
+    result_z = await worker.process_job(date_dirs,config_z,session, rabbitmq_creds_path)
     elapsed = time.time() - start
     print(f"{result_ef} \n {result_z} \n Execution Time: {elapsed}")
     #await asyncio.sleep(10)
 
 if __name__ == "__main__":
+    rabbitmq_creds_path = "../../config/rabbitmq.json"
     credentials_path = "../../config/dbconf.json"
     with open(credentials_path, 'r') as j:
         credentials = json.loads(j.read())
@@ -45,6 +46,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to establish ISPyB connection: {e}")
     try:
-        asyncio.run(main(engine, session))
+        asyncio.run(main(engine, session, rabbitmq_creds_path))
     except KeyboardInterrupt:
         print("Exiting uploader...")

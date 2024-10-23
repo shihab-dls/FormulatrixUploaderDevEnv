@@ -24,10 +24,11 @@ class ZWorker:
     async def process_file(self, date_dirs):
         logger.info(f"Date directories found: {date_dirs}")
         container_dict = self.get_container_dict(date_dirs)            
-
+        ## Handle each barcode dir, providing an executor for each
         with ProcessPoolExecutor() as exe:
            await asyncio.gather(*(self.get_target_and_move(barcode, container_dict, exe) for barcode in container_dict))    
         
+        ## Remove date dirs if empty
         await asyncio.gather(*(rmdir(date_dir) for date_dir in date_dirs))
 
         return f"Processed dates: {date_dirs}"
@@ -41,18 +42,12 @@ class ZWorker:
                 container_dir[barcode] = os.path.dirname(barcode_dir)
         return container_dir
 
-    # DELETE
-    async def get_container_by_barcode(self, barcode):
-        return {"visit": "2024-test", "year":"2024"}
-
     async def get_target_and_move(self,barcode, container_dict, exe):
         container = await retrieve_container_for_barcode(barcode, self.session)
     
         if not container:
             logger.error(f"Could not find container in database for {barcode}")
         
-        container = {"visit": "2024-test", "year":"2024"}
-
         if container["visit"] is None:
             logger.error(f"Container barcode {barcode} has no session")
             return
@@ -88,20 +83,12 @@ class ZWorker:
 
 class EFWorker:
 
-    def __init__(self, config, session):
+    def __init__(self, config, session, channel, callback_queue):
         self.config = config
         self.session = session
         set_logging(config["logging"])
-
-        credentials = pika.PlainCredentials("guest", "guest")
-        connection = pika.BlockingConnection(pika.ConnectionParameters(
-            'rabbitmq', 5672, "/", credentials))
-        self.channel = connection.channel()
-
-        self.channel.queue_declare(queue="jobs")
-
-        result = self.channel.queue_declare(queue="res")
-        self.callback_queue = result.method.queue
+        self.channel = channel
+        self.callback_queue = callback_queue
 
     async def process_file(self, ef_files):
         unhandled_files = []
@@ -129,10 +116,10 @@ class EFWorker:
             xml_data.append(xml_datum(xml,inspectionId,root, nss))
             unique_inspection_id.add(inspectionId)
 
-        sem = Semaphore(50)
-        tasks = [asyncio.create_task(retrieve_container_for_inspectionId(inspectionId, self.session, sem)) for inspectionId in unique_inspection_id]
-        containers = (await asyncio.gather(*tasks))
+        containers = []
         containers_dict = dict()
+        for inspectionId in unique_inspection_id:
+            containers.append(await retrieve_container_for_inspectionId(inspectionId, self.session))
 
         for i in containers:
             for key, value in i.items():
@@ -156,12 +143,13 @@ class EFWorker:
 
         n_batch = self.config["max_files_in_batch"]
 
-        # Handle checks and queries for valid xml file in async tasks
+        ## Handle checks and queries for valid xml files
         xml_paths_with_id_location = namedtuple("xml_paths_with_id_location", "old_path new_path inspectionId location")
-        sem = Semaphore(100)
-        tasks = [asyncio.create_task(self.handle_file(xml_datum_with_container, xml_paths_with_id_location, sem)) for xml_datum_with_container in xml_data_with_container]
-        results = (await asyncio.gather(*tasks))
-        # unhandled files do not have a new path assigned
+        results = []
+        for xml_datum_with_container in xml_data_with_container:
+            results.append(await self.handle_file(xml_datum_with_container, xml_paths_with_id_location, self.session))
+
+        ## Unhandled files do not have a new path assigned
         unhandled_files.append([result for result in results if not result.new_path])
         processing_files = [result for result in results if result.new_path]
 
@@ -178,69 +166,83 @@ class EFWorker:
         unhandled_files.append([result for result in results if not result.new_path])
         handled_files = [result for result in results if result.new_path]
 
-        for file in handled_files:
-            publish(file, self.channel, self.callback_queue)
+        ## Publish a RabbitMQ job for each handled file
+        # for file in handled_files:
+        #     publish(file, self.channel, self.callback_queue)
 
 
         return f"Processed Inspection IDs: [{unique_inspection_id}]"
 
-    async def handle_file(self, xml_datum_with_container, xml_paths_with_id_location, sem):
-        async with sem:
-            xml = xml_datum_with_container.xml_datum.xml
-            inspectionid = xml_datum_with_container.xml_datum.inspectionId
-            root = xml_datum_with_container.xml_datum.root
-            nss = xml_datum_with_container.xml_datum.nss
-            container = xml_datum_with_container.container
-            image = xml.replace(".xml",".jpg")
+    async def handle_file(self, xml_datum_with_container, xml_paths_with_id_location, session):
+        xml = xml_datum_with_container.xml_datum.xml
+        inspectionid = xml_datum_with_container.xml_datum.inspectionId
+        root = xml_datum_with_container.xml_datum.root
+        nss = xml_datum_with_container.xml_datum.nss
+        container = xml_datum_with_container.container
+        image = xml.replace(".xml",".jpg")
 
-            if not file_ready(xml):
-                return xml_paths_with_id_location(xml,None)
 
-            if not container:
-                target_dir = f"{self.config['holding_dir']}/nosession"
-                files_target = [image,xml,target_dir]
-                logger.error(f"Could not find container in database for {inspectionid}")
-                move_unhandled(files_target)
-                return xml_paths_with_id_location(xml,None, inspectionid, None)
+        if not file_ready(xml):
+            return xml_paths_with_id_location(xml,None)
 
-            visit_dir = await get_visit_dir(container, self.config)
+        if not container:
+            target_dir = f"{self.config['holding_dir']}/nosession"
+            files_target = [image,xml,target_dir]
+            logger.error(f"Could not find container in database for {inspectionid}")
+            move_unhandled(files_target)
+            return xml_paths_with_id_location(xml,None, inspectionid, None)
 
-            if not visit_dir:
-                logger.error(f"No visit directory for {inspectionid}")
-                return xml_paths_with_id_location(xml,None, inspectionid, None)
+        visit_dir = await get_visit_dir(container, self.config)
 
-            new_path = f"{visit_dir}/imaging/{container['containerId']}/{inspectionid}"
+        if not visit_dir:
+            logger.error(f"No visit directory for {inspectionid}")
+            return xml_paths_with_id_location(xml,None, inspectionid, None)
 
-            if not await make_dirs(new_path,self.config):
-                logger.error(f"Could not make dir: {target_dir} for {inspectionid}")
-                return xml_paths_with_id_location(xml,None)
+        new_path = f"{visit_dir}/imaging/{container['containerId']}/{inspectionid}"
 
-            position = self.get_position(
-                root.find("oppf:Drop", nss).text,
-                container["containerType"],)
-            
-            if not position:
-                logger.error(f"Could not math drop for {xml}")
-                return xml_paths_with_id_location(xml,None, inspectionid, None)
-                        
-            sampleid = await retrieve_sample_for_container_id_and_location(position, container["containerId"], self.session)
+        if not await make_dirs(new_path,self.config):
+            logger.error(f"Could not make dir: {target_dir} for {inspectionid}")
+            return xml_paths_with_id_location(xml,None)
+
+        position = self.get_position(
+            root.find("oppf:Drop", nss).text,
+            container["containerType"],)
         
-            if not sampleid:
-                target_dir = f"{self.config['holding_dir']}/nosample"
-                files_target = [image,xml,target_dir]
-                logger.error(f"Couldnt find a blsample for containerid: {container['containerId']}, position: {position}")
-                move_unhandled(files_target)
-                return xml_paths_with_id_location(xml,None, inspectionid, position)
-            else:
-                sampleid = sampleid[0]
+        if not position:
+            logger.error(f"Could not math drop for {xml}")
+            return xml_paths_with_id_location(xml,None, inspectionid, None)
+                    
+        sampleid = await retrieve_sample_for_container_id_and_location(position, container["containerId"], self.session)
+    
+        if not sampleid:
+            target_dir = f"{self.config['holding_dir']}/nosample"
+            files_target = [image,xml,target_dir]
+            logger.error(f"Couldnt find a blsample for containerid: {container['containerId']}, position: {position}")
+            move_unhandled(files_target)
+            return xml_paths_with_id_location(xml,None, inspectionid, position)
+        else:
+            sampleid = sampleid[0]
 
-            mppx, mppy = self.get_mpp_coords(root, nss)
-            
-            iid = os.path.basename(image) # Meant to be a sql procedure
+        mppx, mppy = self.get_mpp_coords(root, nss)
 
-            new_file = f"{new_path}/{iid}"
+        iid = await upsert_sample_image(
+            p_id= None,
+            p_sampleId= str(sampleid),
+            p_micronsPerPixelX = str(mppx),
+            p_micronsPerPixelY= str(mppy),
+            p_containerInspectionId = str(inspectionid),
+            session=None # dev purposes
+        )
 
-            return xml_paths_with_id_location(xml,new_file, inspectionid, position)
+        new_file = f"{new_path}/{iid}.jpg"
+
+        await upsert_sample_image(
+            p_id= iid,
+            p_imageFullPath= str(new_file),
+            session= None
+        )
+
+        return xml_paths_with_id_location(xml,new_file, inspectionid, position)
                     
     def get_mpp_coords(self, root, nss):
         mppx = float(

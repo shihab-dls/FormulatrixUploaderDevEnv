@@ -11,11 +11,14 @@ import logging.handlers
 from collections import namedtuple
 import pika
 import json
-import uuid
-
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+import re
+import ispyb
 
 logger = logging.getLogger()
 
+## Parses a visit directory from container items
 async def get_visit_dir(container, config):
     visit = container["visit"]
     proposal = visit[: visit.index("-")]
@@ -29,12 +32,14 @@ def move_unhandled(files_target):
     for file in [image,xml]:
         os.rename(file, f"{target}/{os.path.basename(file)}")
 
+## Flip an image and save it to a new path
 def transpose_and_save(f, new_f):
     im = Image.open(f)
     im_flipped = im.transpose(Image.FLIP_TOP_BOTTOM)
     im_flipped.save(new_f)
     return im_flipped
 
+## Check if file is non-empty and 10s old
 def file_ready(f): return True if time.time() - os.stat(f).st_mtime > 10 and os.stat(f).st_size > 0 else False
 
 async def rmdir(src_dir):
@@ -125,24 +130,50 @@ def move_file(xml, new_f, inspectionId, location, config):
     except IOError:
         return xml, None, inspectionId, location
     
+### RAW ISPyB QUERIES ###
+
 async def retrieve_container_for_barcode(barcode, session):
     async with session() as connection:
         async with connection.begin():
             result = await connection.execute(text(f'SELECT concat(p.proposalCode, p.proposalNumber, "-", bs.visit_number) "visit", date_format(c.blTimeStamp, "%Y") "year" FROM Container c LEFT OUTER JOIN BLSession bs ON bs.sessionId = c.sessionId LEFT OUTER JOIN Proposal p ON p.proposalId = bs.proposalId WHERE c.barcode="{barcode}" LIMIT 1;'))
         return result.mappings().all()[0]
 
-async def retrieve_container_for_inspectionId(inspectionId, session, sem):
-    async with sem:
-        async with session() as connection:
-            async with connection.begin():
-                result = await connection.execute(text(f'SELECT c.containerType, c.containerId, c.sessionId, concat(p.proposalCode, p.proposalNumber, "-", bs.visit_number) "visit", date_format(c.blTimeStamp, "%Y") as year FROM Container c INNER JOIN ContainerInspection ci ON ci.containerId = c.containerId INNER JOIN Dewar d ON d.dewarId = c.dewarId INNER JOIN Shipping s ON s.shippingId = d.shippingId INNER JOIN Proposal p ON p.proposalId = s.proposalId LEFT OUTER JOIN BLSession bs ON bs.sessionId = c.sessionId WHERE ci.containerinspectionId = {inspectionId} LIMIT 1;'))
-            return {inspectionId: result.mappings().all()[0]}
+async def retrieve_container_for_inspectionId(inspectionId, session):
+    async with session() as connection:
+        async with connection.begin():
+            result = await connection.execute(text(f'SELECT c.containerType, c.containerId, c.sessionId, concat(p.proposalCode, p.proposalNumber, "-", bs.visit_number) "visit", date_format(c.blTimeStamp, "%Y") as year FROM Container c INNER JOIN ContainerInspection ci ON ci.containerId = c.containerId INNER JOIN Dewar d ON d.dewarId = c.dewarId INNER JOIN Shipping s ON s.shippingId = d.shippingId INNER JOIN Proposal p ON p.proposalId = s.proposalId LEFT OUTER JOIN BLSession bs ON bs.sessionId = c.sessionId WHERE ci.containerinspectionId = {inspectionId} LIMIT 1;'))
+        return {inspectionId: result.mappings().all()[0]}
 
 async def retrieve_sample_for_container_id_and_location(p_location, p_containerId, session):
     async with session() as connection:
         async with connection.begin():
             result = await connection.execute(text(f'SELECT blSampleId FROM BLSample WHERE containerId="{p_containerId}" AND location="{p_location}" LIMIT 1;'))
     return result.fetchone()
+
+async def upsert_sample_image(p_id = "Null", p_sampleId = "Null", p_micronsPerPixelX = "Null", p_micronsPerPixelY = "Null", p_containerInspectionId = "Null", p_imageFullPath = "Null", p_comments = "Null", session = None):
+
+    url = "mysql+asyncmy://root:@mariadb_test:3306/ispyb"
+    
+    try:
+        engine = create_async_engine(url, pool_size=1, max_overflow=1)
+        session = sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+            )
+    except Exception as e:
+        print(f"Failed to establish ISPyB connection: {e}")
+
+    async with session() as connection:
+        async with connection.begin():
+            if p_id: 
+                await connection.execute(text(f'UPDATE BLSampleImage SET blSampleId = IFNULL({p_sampleId}, blSampleId),containerInspectionId = IFNULL({p_containerInspectionId}, containerInspectionId), micronsPerPixelX = IFNULL({p_micronsPerPixelX}, micronsPerPixelX),micronsPerPixelY = IFNULL({p_micronsPerPixelY}, micronsPerPixelY), imageFullPath = IFNULL("{p_imageFullPath}", imageFullPath), comments = IFNULL({p_comments}, comments), modifiedTimeStamp = current_timestamp WHERE blSampleImageId = {p_id};'))
+            else:
+                await connection.execute(text(f'INSERT INTO BLSampleImage (blSampleId, containerInspectionId, micronsPerPixelX, micronsPerPixelY, imageFullPath, comments, blTimeStamp) VALUES ({p_sampleId}, {p_containerInspectionId}, {p_micronsPerPixelX}, {p_micronsPerPixelY}, {p_imageFullPath}, {p_comments}, current_timestamp);'))
+                result = await connection.execute(text(f'SELECT LAST_INSERT_ID();'))
+                return result.fetchone()[0]
+
+### ^^RAW ISPyB QUERIES^^ ###
 
 def set_logging(logs):
     levels_dict = {
@@ -180,6 +211,7 @@ def set_logging(logs):
             handler.setLevel(logging.WARNING)
         logger.addHandler(handler)
 
+## Posts a job for an EF image for downstream processing
 def publish(job, channel, callback):
     
     payload = {
