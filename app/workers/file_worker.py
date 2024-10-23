@@ -13,8 +13,10 @@ from collections import namedtuple
 import logging
 import logging.handlers
 import uuid
+import subprocess
 
 logger = logging.getLogger()
+ZOCALO_SCRIPT = "/dls_sw/i02-2/software/cronjobs/run_zoc_image_pipeline.sh"
 
 class ZWorker:
     def __init__(self, config, session):
@@ -175,6 +177,9 @@ class EFWorker:
             fh.write("\n")
         
         logger.info(f"Saved list of {len(handled_files)} files to {up_files_out_path}")
+
+        # sp_output = subprocess.run([ZOCALO_SCRIPT, rand_id], capture_output=True)
+        # logger.info(sp_output.stdout.decode("utf-8"))
 
         return f"Processed Inspection IDs: [{unique_inspection_id}]"
 
