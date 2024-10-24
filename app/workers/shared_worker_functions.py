@@ -139,6 +139,7 @@ async def retrieve_sample_for_container_id_and_location(p_location, p_containerI
 
 async def upsert_sample_image(p_id = "Null", p_sampleId = "Null", p_micronsPerPixelX = "Null", p_micronsPerPixelY = "Null", p_containerInspectionId = "Null", p_imageFullPath = "Null", p_comments = "Null", session = None):
 
+    ## Dev puposes; uses test database for upsert tasks.
     url = "mysql+asyncmy://root:@mariadb_test:3306/ispyb"
     
     try:

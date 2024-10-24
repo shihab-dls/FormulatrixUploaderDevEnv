@@ -7,11 +7,10 @@ from sqlalchemy.orm import sessionmaker
 import ispyb.sqlalchemy
 import time
 import json
+import argparse
 
-async def main(engine, session):
+async def main(engine, up_files_out_dir ,config_file_ef, config_file_z, session):
     # Create an instance of the FormulatrixUploader
-    config_file_ef = "../../config/config_ef.json"
-    config_file_z = "../../config/config_z.json"
     with open(config_file_ef, 'r') as j:
         config_ef = json.loads(j.read())
     with open(config_file_z, 'r') as j:
@@ -31,7 +30,21 @@ async def main(engine, session):
 if __name__ == "__main__":
     up_files_out_dir = "../../filelists/"
     credentials_path = "../../config/dbconf.json"
-    with open(credentials_path, 'r') as j:
+
+    parser = argparse.ArgumentParser(description="Formulatrix Uploader to handle EF and Z file handling")
+    
+    parser.add_argument("--up_files_out_dir", type=str, required=True,
+                        help="Path to the output directory for handled files")
+    parser.add_argument("--credentials_path", type=str, required=True,
+                        help="Path to the database credentials configuration file")
+    parser.add_argument("--config_file_ef", type=str, required=True,
+                        help="Path to the EF configuration file")
+    parser.add_argument("--config_file_z", type=str, required=True,
+                        help="Path to the Z configuration file")
+    
+    args = parser.parse_args()
+
+    with open(args.credentials_path, 'r') as j:
         credentials = json.loads(j.read())
 
     # Generate Db URL, but use asyncmy driver
@@ -46,6 +59,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to establish ISPyB connection: {e}")
     try:
-        asyncio.run(main(engine, session))
+        asyncio.run(main(engine, args.up_files_out_dir, args.config_file_ef, args.config_file_z, session))
     except KeyboardInterrupt:
         print("Exiting uploader...")
