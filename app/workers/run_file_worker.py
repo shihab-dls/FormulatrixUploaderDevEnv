@@ -28,9 +28,6 @@ async def main(engine, up_files_out_dir ,config_file_ef, config_file_z, session)
     #await asyncio.sleep(10)
 
 if __name__ == "__main__":
-    up_files_out_dir = "../../filelists/"
-    credentials_path = "../../config/dbconf.json"
-
     parser = argparse.ArgumentParser(description="Formulatrix Uploader to handle EF and Z file handling")
     
     parser.add_argument("--up_files_out_dir", type=str, required=True,
