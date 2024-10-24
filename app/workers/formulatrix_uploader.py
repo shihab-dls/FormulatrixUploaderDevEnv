@@ -21,22 +21,26 @@ class FormulatrixUploader():
             return ZWorker(config, engine)
         
         elif worker_type == 'EF':
-            with open(rabbitmq_creds_path, 'r') as j:
-                rabbitmq_creds = json.loads(j.read())
-
-            connection = pika.BlockingConnection(
-                pika.ConnectionParameters(
-                rabbitmq_creds["server"], 
-                rabbitmq_creds["port"], 
-                rabbitmq_creds["vhost"], 
-                pika.PlainCredentials(
-                    rabbitmq_creds["user"], 
-                    rabbitmq_creds["password"])))
-            
-            channel = connection.channel()
-            channel.queue_declare(queue=rabbitmq_creds["job_queue"])
-            result = channel.queue_declare(queue=rabbitmq_creds["result_queue"])
-            callback_queue = result.method.queue
+            channel, callback_queue = self.establish_RabbitMQ_connection(rabbitmq_creds_path)
             return EFWorker(config, engine, channel, callback_queue)
         else:
             raise ValueError(f"Unknown worker type: {worker_type}")
+        
+    async def establish_RabbitMQ_connection(rabbitmq_creds_path):
+        with open(rabbitmq_creds_path, 'r') as j:
+            rabbitmq_creds = json.loads(j.read())
+
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(
+            rabbitmq_creds["server"], 
+            rabbitmq_creds["port"], 
+            rabbitmq_creds["vhost"], 
+            pika.PlainCredentials(
+                rabbitmq_creds["user"], 
+                rabbitmq_creds["password"])))
+        
+        channel = connection.channel()
+        channel.queue_declare(queue=rabbitmq_creds["job_queue"])
+        result = channel.queue_declare(queue=rabbitmq_creds["result_queue"])
+        callback_queue = result.method.queue
+        return channel, callback_queue
