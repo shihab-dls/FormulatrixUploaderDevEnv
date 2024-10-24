@@ -86,12 +86,10 @@ class ZWorker:
 
 class EFWorker:
 
-    def __init__(self, config, session, channel, callback_queue):
+    def __init__(self, config, session):
         self.config = config
         self.session = session
         set_logging(config["logging"])
-        self.channel = channel
-        self.callback_queue = callback_queue
 
     async def process_file(self, ef_files, up_files_out_dir):
         unhandled_files = []

@@ -9,12 +9,8 @@ import logging
 import sys
 import logging.handlers
 from collections import namedtuple
-import pika
-import json
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-import re
-import ispyb
 
 logger = logging.getLogger()
 
@@ -64,18 +60,9 @@ async def make_dirs(path, config):
                         path,
                     ]
                 )
-        except NotADirectoryError:
+        except Exception as e:
+            logger.error(f'Could not make directory: {e}')
             return False
-
-        except OSError:
-            # if exc.errno == errno.EEXIST and os.path.isdir(new_path):
-            #     pass
-            # elif exc.errno == errno.EACCES:
-            #     logger.error("%s - %s" % (exc.strerror, new_path))
-            #     return False
-            # else:
-            #     raise
-            raise  # This code was broken and always raised
 
     return True
 
