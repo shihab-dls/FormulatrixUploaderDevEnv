@@ -1,3 +1,4 @@
 EF/*.*
 upload/*.*
 archive/*.*
+app/worker/__pycache_/
