@@ -3,3 +3,4 @@ upload/*
 archive/*
 filelists/*.txt
 config/*.swp
+app/worker/__pycache__/
